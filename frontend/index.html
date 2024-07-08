@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frontend App</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav>
+    <ul>
+        <li><a href="#" onclick="showCreateProfileForm()">Create Profile</a></li>
+        <li><a href="#" onclick="loadProfiles()">Profiles</a></li>
+        <li><a href="#" onclick="loadProfile(selectedProfileId)">Profile</a></li>
+        <li><a href="#" onclick="loadPosts(selectedProfileId)">Posts</a></li>
+        <li><a href="#" onclick="loadNotifications(selectedProfileId)">Notifications</a></li>
+    </ul>
+</nav>
+<div id="content"></div>
+<script src="scripts.js"></script>
+</body>
+</html>
