@@ -33,8 +33,12 @@ func createRouter(client *mongo.Client) *gin.Engine {
 	router.POST("/profile", func(context *gin.Context) {
 		createOrModifyProfile(context, client)
 	})
+
 	router.GET("/posts/:id", func(context *gin.Context) {
 		GetAllPostsByAuthorID(context, client)
+	})
+	router.GET("/all_posts", func(context *gin.Context) {
+		GetAllPosts(context, client)
 	})
 	router.POST("/posts", func(context *gin.Context) {
 		CreatePost(context, client)
@@ -45,6 +49,7 @@ func createRouter(client *mongo.Client) *gin.Engine {
 	router.POST("/posts/like/:user_id/:post_id", func(context *gin.Context) {
 		LikePost(context, client)
 	})
+
 	router.GET("/notifications/:user_id", func(context *gin.Context) {
 		GetNotifications(context, client)
 	})

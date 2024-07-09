@@ -11,59 +11,117 @@ async function loadProfile(id) {
     const contentDiv = document.getElementById('content');
     contentDiv.innerHTML = `
         <h1>Profile</h1>
-        <img src="${profile.avatar}" alt="Avatar" />
+        <p>Avatar: ${profile.avatar} </p>
         <p>Name: ${profile.name}</p>
-        <p>Posts: ${profile.posts.length}</p>
-        <p>Liked Posts: ${profile.liked_posts.length}</p>
-        <p>Notifications: ${profile.notifications.length}</p>
+        <p>Posts: ${profile.posts}</p>
+        <p>Liked Posts: ${profile.liked_posts}</p>
+        <p>Notifications: ${profile.notifications}</p>
     `;
 }
 
-async function loadPosts(id) {
+async function loadUserPosts(id) {
     if (!id) {
         alert('Please select a profile first.');
         return;
     }
-    const response = await fetch(`${apiBaseUrl}/posts`);
+    const response = await fetch(`${apiBaseUrl}/posts/${id}`);
+    const posts = await response.json();
+    console.log(posts.posts)
+    const contentDiv = document.getElementById('content');
+    contentDiv.innerHTML = `
+        <h1>Posts</h1>
+        <ul>
+            ${posts.posts.map(post => `
+                <li>
+                    <p>User Id: ${post.user_id}</p>
+                    <p>Post Id: ${post.id}</p>
+                    <p>Content: ${post.content}</p>
+                    <p>Likes: ${post.likes_count}</p>                    
+                </li>
+            `).join('')}
+        </ul>
+       
+    `;
+}
+
+async function loadAllPosts(id) {
+    if (!id) {
+        alert('Please select a profile first.');
+        return;
+    }
+
+    const response = await fetch(`${apiBaseUrl}/all_posts`);
+    const posts = await response.json();
+    console.log(posts.posts)
+    const contentDiv = document.getElementById('content');
+    contentDiv.innerHTML = `
+        <h1>Posts</h1>
+        <ul>
+            ${posts.posts.map(post => `
+                <li>
+                    <p>User Id: ${post.user_id}</p>
+                    <p>Post Id: ${post.id}</p>
+                    <p>Content: ${post.content}</p>
+                    <p>Likes: ${post.likes_count}</p>
+                    
+                    <button onclick="likePost('${post.id}', '${id}')">Like</button>
+                </li>
+            `).join('')}
+        </ul>
+    `;
+
+}
+
+
+async function createPPost(id) {
+    const contentDiv = document.getElementById('content');
+    contentDiv.innerHTML = `<input type="text" id="newPostContent" placeholder="Write a new post"/>
+    <button onClick="createPost('${id}')">Create Post</button>`
+}
+
+async function loadUserLikedPosts(id) {
+    if (!id) {
+        alert('Please select a profile first.');
+        return;
+    }
+    const response = await fetch(`${apiBaseUrl}/posts/liked/${id}`);
     const posts = await response.json();
     const contentDiv = document.getElementById('content');
     contentDiv.innerHTML = `
         <h1>Posts</h1>
         <ul>
-            ${posts.map(post => `
+            ${posts.liked_posts.map(post => `
                 <li>
-                    ${post.content}
+                    <p>User Id: ${post.user_id}</p>
+                    <p>Post Id: ${post.id}</p>
+                    <p>Content: ${post.content}</p>
                     <p>Likes: ${post.likes_count}</p>
-                    <button onclick="likePost('${post.id}', ${id})">Like</button>
                 </li>
             `).join('')}
         </ul>
-        <input type="text" id="newPostContent" placeholder="Write a new post" />
-        <button onclick="createPost(${id})">Create Post</button>
     `;
 }
 
 async function createPost(userId) {
     const content = document.getElementById('newPostContent').value;
-    await fetch(`${apiBaseUrl}/posts`, {
+
+    const result = await fetch(`${apiBaseUrl}/posts`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ user_id: userId, content: content })
+        body: JSON.stringify({user_id: userId, content: content})
     });
-    loadPosts(userId);
 }
 
 async function likePost(postId, userId) {
-    await fetch(`${apiBaseUrl}/posts/${postId}/like`, {
+    await fetch(`${apiBaseUrl}/posts/like/${userId}/${postId}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ user_id: userId })
+        }
     });
-    loadPosts(userId);
+    loadAllPosts(userId)
 }
 
 async function loadNotifications(userId) {
@@ -74,7 +132,7 @@ async function loadNotifications(userId) {
     const contentDiv = document.getElementById('content');
     const ws = new WebSocket(`ws://localhost:8080/notifications/${userId}`);
 
-    ws.onmessage = function(event) {
+    ws.onmessage = function (event) {
         const notification = JSON.parse(event.data);
         contentDiv.innerHTML += `
             <div>
@@ -84,11 +142,11 @@ async function loadNotifications(userId) {
         `;
     };
 
-    ws.onclose = function() {
+    ws.onclose = function () {
         console.log('WebSocket connection closed');
     };
 
-    ws.onerror = function(error) {
+    ws.onerror = function (error) {
         console.error('WebSocket error:', error);
     };
 }
@@ -111,7 +169,7 @@ async function createProfile() {
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ name: name, avatar: avatar })
+        body: JSON.stringify({name: name, avatar: avatar})
     });
     loadProfiles();
 }

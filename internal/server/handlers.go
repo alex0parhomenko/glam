@@ -67,6 +67,15 @@ func createOrModifyProfile(ctx *gin.Context, client *mongo.Client) {
 
 	collection := client.Database("glam").Collection("users")
 	if user.ID.IsZero() {
+		if user.Posts == nil {
+			user.Posts = []primitive.ObjectID{}
+		}
+		if user.LikedPosts == nil {
+			user.LikedPosts = []primitive.ObjectID{}
+		}
+		if user.Notifications == nil {
+			user.Notifications = []primitive.ObjectID{}
+		}
 		result, err := collection.InsertOne(context.Background(), user)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -100,6 +109,7 @@ func GetAllPostsByAuthorID(ctx *gin.Context, client *mongo.Client) {
 	// Парсинг ObjectID из строки authorID
 	objID, err := primitive.ObjectIDFromHex(userId)
 	if err != nil {
+		log.Println(err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -108,6 +118,7 @@ func GetAllPostsByAuthorID(ctx *gin.Context, client *mongo.Client) {
 	filter := bson.M{"user_id": objID}
 	cursor, err := collection.Find(context.Background(), filter)
 	if err != nil {
+		log.Println(err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -117,6 +128,7 @@ func GetAllPostsByAuthorID(ctx *gin.Context, client *mongo.Client) {
 	for cursor.Next(context.Background()) {
 		var post db.Post
 		if err := cursor.Decode(&post); err != nil {
+			log.Println(err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -124,10 +136,43 @@ func GetAllPostsByAuthorID(ctx *gin.Context, client *mongo.Client) {
 	}
 
 	if err := cursor.Err(); err != nil {
+		log.Println(err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusInternalServerError, gin.H{"posts": posts})
+	ctx.JSON(http.StatusOK, gin.H{"posts": posts})
+}
+
+func GetAllPosts(ctx *gin.Context, client *mongo.Client) {
+
+	// Получение коллекции "posts"
+	collection := client.Database("glam").Collection("posts")
+
+	cursor, err := collection.Find(context.Background(), bson.M{})
+	if err != nil {
+		log.Println(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Слайс для хранения найденных постов
+	posts := []db.Post{}
+	for cursor.Next(context.Background()) {
+		var post db.Post
+		if err := cursor.Decode(&post); err != nil {
+			log.Println(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		posts = append(posts, post)
+	}
+
+	if err := cursor.Err(); err != nil {
+		log.Println(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"posts": posts})
 }
 
 func CreatePost(ctx *gin.Context, client *mongo.Client) {
@@ -138,16 +183,52 @@ func CreatePost(ctx *gin.Context, client *mongo.Client) {
 		return
 	}
 
-	collection := client.Database("glam").Collection("posts")
+	postsCollection := client.Database("glam").Collection("posts")
+	usersCollection := client.Database("glam").Collection("users")
 
-	result, err := collection.InsertOne(context.Background(), post)
+	session, err := client.StartSession()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		ctx.Status(http.StatusInternalServerError)
 	}
+	defer session.EndSession(ctx)
 
-	post.ID = result.InsertedID.(primitive.ObjectID)
-	ctx.JSON(http.StatusCreated, post)
+	transactionOptions := options.Transaction().SetWriteConcern(writeconcern.Majority())
+
+	err = mongo.WithSession(ctx, session, func(sessionContext mongo.SessionContext) error {
+		// Начало транзакции
+		err := session.StartTransaction(transactionOptions)
+		if err != nil {
+			return err
+		}
+
+		result, err := postsCollection.InsertOne(context.Background(), post)
+		if err != nil {
+			session.AbortTransaction(sessionContext)
+			log.Println("1", err)
+			return err
+		}
+
+		post.ID = result.InsertedID.(primitive.ObjectID)
+
+		filter := bson.M{"_id": post.UserID}
+		update := bson.M{"$push": bson.M{"posts": post.ID}}
+		_, err = usersCollection.UpdateOne(context.Background(), filter, update)
+		if err != nil {
+			session.AbortTransaction(sessionContext)
+			log.Println("2", err)
+			return err
+		}
+
+		// Коммит транзакции
+		return session.CommitTransaction(sessionContext)
+	})
+
+	if err != nil {
+		log.Println(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	} else {
+		ctx.JSON(http.StatusCreated, post)
+	}
 }
 
 func GetAllLikedPosts(ctx *gin.Context, client *mongo.Client) {
@@ -182,7 +263,7 @@ func GetAllLikedPosts(ctx *gin.Context, client *mongo.Client) {
 		likedPosts = append(likedPosts, post)
 	}
 
-	ctx.JSON(http.StatusInternalServerError, gin.H{"liked_posts": likedPosts})
+	ctx.JSON(http.StatusOK, gin.H{"liked_posts": likedPosts})
 }
 
 func LikePost(ctx *gin.Context, client *mongo.Client) {
