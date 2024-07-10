@@ -122,6 +122,7 @@ func GetAllPostsByAuthorID(ctx *gin.Context, client *mongo.Client) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	defer cursor.Close(context.Background())
 
 	// Слайс для хранения найденных постов
 	posts := []db.Post{}
@@ -154,6 +155,7 @@ func GetAllPosts(ctx *gin.Context, client *mongo.Client) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	defer cursor.Close(context.Background())
 
 	// Слайс для хранения найденных постов
 	posts := []db.Post{}
@@ -190,11 +192,11 @@ func CreatePost(ctx *gin.Context, client *mongo.Client) {
 	if err != nil {
 		ctx.Status(http.StatusInternalServerError)
 	}
-	defer session.EndSession(ctx)
+	defer session.EndSession(context.TODO())
 
 	transactionOptions := options.Transaction().SetWriteConcern(writeconcern.Majority())
 
-	err = mongo.WithSession(ctx, session, func(sessionContext mongo.SessionContext) error {
+	err = mongo.WithSession(context.TODO(), session, func(sessionContext mongo.SessionContext) error {
 		// Начало транзакции
 		err := session.StartTransaction(transactionOptions)
 		if err != nil {
@@ -203,8 +205,6 @@ func CreatePost(ctx *gin.Context, client *mongo.Client) {
 
 		result, err := postsCollection.InsertOne(context.Background(), post)
 		if err != nil {
-			session.AbortTransaction(sessionContext)
-			log.Println("1", err)
 			return err
 		}
 
@@ -214,8 +214,6 @@ func CreatePost(ctx *gin.Context, client *mongo.Client) {
 		update := bson.M{"$push": bson.M{"posts": post.ID}}
 		_, err = usersCollection.UpdateOne(context.Background(), filter, update)
 		if err != nil {
-			session.AbortTransaction(sessionContext)
-			log.Println("2", err)
 			return err
 		}
 
@@ -224,7 +222,9 @@ func CreatePost(ctx *gin.Context, client *mongo.Client) {
 	})
 
 	if err != nil {
-		log.Println(err)
+		if err := session.AbortTransaction(context.TODO()); err != nil {
+			log.Println(err)
+		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 	} else {
 		ctx.JSON(http.StatusCreated, post)
@@ -275,14 +275,6 @@ func LikePost(ctx *gin.Context, client *mongo.Client) {
 	postsCollection := client.Database("glam").Collection("posts")
 	notificationCollection := client.Database("glam").Collection("notification")
 
-	session, err := client.StartSession()
-	if err != nil {
-		ctx.Status(http.StatusInternalServerError)
-	}
-	defer session.EndSession(ctx)
-
-	transactionOptions := options.Transaction().SetWriteConcern(writeconcern.Majority())
-
 	// Парсинг ObjectID из строк userID и postID
 	userObjID, err := primitive.ObjectIDFromHex(userId)
 	if err != nil {
@@ -295,7 +287,15 @@ func LikePost(ctx *gin.Context, client *mongo.Client) {
 		return
 	}
 
-	err = mongo.WithSession(ctx, session, func(sessionContext mongo.SessionContext) error {
+	session, err := client.StartSession()
+	if err != nil {
+		ctx.Status(http.StatusInternalServerError)
+	}
+	defer session.EndSession(context.TODO())
+
+	transactionOptions := options.Transaction().SetWriteConcern(writeconcern.Majority())
+
+	err = mongo.WithSession(context.TODO(), session, func(sessionContext mongo.SessionContext) error {
 		// Начало транзакции
 		err := session.StartTransaction(transactionOptions)
 		if err != nil {
@@ -307,7 +307,6 @@ func LikePost(ctx *gin.Context, client *mongo.Client) {
 		filter := bson.M{"_id": userObjID}
 		err = usersCollection.FindOne(context.Background(), filter).Decode(&user)
 		if err != nil {
-			session.AbortTransaction(sessionContext)
 			return err
 		}
 
@@ -316,7 +315,6 @@ func LikePost(ctx *gin.Context, client *mongo.Client) {
 		filter = bson.M{"_id": postObjID}
 		err = postsCollection.FindOne(context.Background(), filter).Decode(&post)
 		if err != nil {
-			session.AbortTransaction(sessionContext)
 			return err
 		}
 
@@ -331,7 +329,6 @@ func LikePost(ctx *gin.Context, client *mongo.Client) {
 		update := bson.M{"$inc": bson.M{"likes_count": 1}}
 		_, err = postsCollection.UpdateOne(context.Background(), filter, update)
 		if err != nil {
-			session.AbortTransaction(sessionContext)
 			return err
 		}
 
@@ -339,7 +336,6 @@ func LikePost(ctx *gin.Context, client *mongo.Client) {
 		update = bson.M{"$push": bson.M{"liked_posts": postObjID}}
 		_, err = usersCollection.UpdateOne(context.Background(), filter, update)
 		if err != nil {
-			session.AbortTransaction(sessionContext)
 			return err
 		}
 
@@ -349,19 +345,15 @@ func LikePost(ctx *gin.Context, client *mongo.Client) {
 			PostId: postObjID,
 		})
 		if err != nil {
-			session.AbortTransaction(sessionContext)
 			return err
 		}
-
 		// Коммит транзакции
-		err = session.CommitTransaction(sessionContext)
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return session.CommitTransaction(sessionContext)
 	})
 	if err != nil {
+		if err := session.AbortTransaction(context.TODO()); err != nil {
+			log.Println(err)
+		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 	} else {
 		ctx.Status(http.StatusOK)
@@ -382,12 +374,14 @@ func GetNotifications(ctx *gin.Context, client *mongo.Client) {
 	changeStreamOptions := options.ChangeStream().SetFullDocument(options.UpdateLookup)
 	changeStream, err := collection.Watch(c, mongo.Pipeline{}, changeStreamOptions)
 	if err != nil {
+		log.Println(err)
 		ctx.Status(http.StatusInternalServerError)
 		return
 	}
 	defer changeStream.Close(c)
 
 	conn, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
+	log.Println("NEw connnection")
 	if err != nil {
 		ctx.Status(http.StatusInternalServerError)
 		return
@@ -398,20 +392,22 @@ func GetNotifications(ctx *gin.Context, client *mongo.Client) {
 		var changeDocument bson.M
 		if changeStream.Next(ctx) {
 			if err := changeStream.Decode(&changeDocument); err != nil {
-				log.Println("Ошибка при декодировании документа изменений:", err)
+				log.Println(err)
 				continue
 			}
 
 			// Преобразуем документ в JSON
 			jsonData, err := json.Marshal(changeDocument)
 			if err != nil {
-				log.Println("Ошибка при маршалинге JSON:", err)
+				log.Println(err)
 				continue
 			}
 
+			log.Println(string(jsonData))
+
 			// Отправляем данные по WebSocket
 			if err := conn.WriteMessage(websocket.TextMessage, jsonData); err != nil {
-				log.Println("Ошибка при отправке сообщения по WebSocket:", err)
+				log.Println(err)
 				break
 			}
 		} else {

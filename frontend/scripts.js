@@ -1,5 +1,7 @@
 const apiBaseUrl = 'http://localhost:8080';
 let selectedProfileId = null;
+let ws = null;
+
 
 async function loadProfile(id) {
     if (!id) {
@@ -124,31 +126,46 @@ async function likePost(postId, userId) {
     loadAllPosts(userId)
 }
 
+
+
 async function loadNotifications(userId) {
     if (!userId) {
         alert('Please select a profile first.');
         return;
     }
     const contentDiv = document.getElementById('content');
-    const ws = new WebSocket(`ws://localhost:8080/notifications/${userId}`);
+    if (ws == null) {
+        ws = new WebSocket(`ws://localhost:8080/notifications/${userId}`);
+        console.log("connect ws")
+    }
 
+    contentDiv.innerHTML = ``
     ws.onmessage = function (event) {
         const notification = JSON.parse(event.data);
         contentDiv.innerHTML += `
             <div>
-                <p>Notification Type: ${notification.type}</p>
-                <p>Post ID: ${notification.post_id}</p>
+                <p>Notification Type: ${notification.fullDocument.type}</p>
+                <p>User ID: ${notification.fullDocument.user_id}</p>
+                <p>Post ID: ${notification.fullDocument.post_id}</p>
             </div>
         `;
-    };
-
-    ws.onclose = function () {
-        console.log('WebSocket connection closed');
     };
 
     ws.onerror = function (error) {
         console.error('WebSocket error:', error);
     };
+}
+
+async function stopNotifications(userId) {
+    if (!userId) {
+        alert('Please select a profile first.');
+        return;
+    }
+    if (ws) {
+        ws.close()
+        ws = null;
+        console.log("Close ws")
+    }
 }
 
 async function showCreateProfileForm() {
@@ -191,6 +208,9 @@ async function loadProfiles() {
 }
 
 function selectProfile(id) {
+    stopNotifications(selectedProfileId)
     selectedProfileId = id;
+
+
     alert(`Selected profile ID: ${id}`);
 }
