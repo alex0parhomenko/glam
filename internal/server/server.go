@@ -14,7 +14,7 @@ import (
 func createRouter(client *mongo.Client) *gin.Engine {
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:63342"},        // Разрешенные источники
+		AllowOrigins:     []string{"*"},                             // Разрешенные источники
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},  // Разрешенные методы
 		AllowHeaders:     []string{"Content-Type", "Authorization"}, // Разрешенные заголовки
 		ExposeHeaders:    []string{"Content-Length"},
